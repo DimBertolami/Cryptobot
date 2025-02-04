@@ -1,19 +1,15 @@
+
 import os
 import requests
+from alpaca_trade_api.rest import REST
 
-def fetch_alpaca_historical_data(api_key, api_secret, symbol="BTC/USD", timeframe="1Day"):
-    url = f"https://data.alpaca.markets/v1beta1/crypto/BTCUSD/bars"
-    headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
-    params = {"symbols": symbol, "timeframe": timeframe}
-    response = requests.get(url, headers=headers, params=params)
-    return response.json()
+api = REST(os.getenv("ALPACA_KEY"), os.getenv("ALPACA_SECRET"), base_url="https://data.alpaca.markets")
+bars = api.get_crypto_bars("BTC/USD", timeframe="1Day", start="2023-01-01", end="2023-12-31").df
 
-# remember to store sensitive data safe inside an environment variable. 
-# Do so by exporting the value from the terminal like this: 
-#              export ALPACA_KEY="******************"
-#              export ALPACA_SECRET="***************************"
-
-api_key = os.getenv("ALPACA_KEY")
-api_secret = os.getenv("ALPACA_SECRET")
-data = fetch_alpaca_historical_data(api_key, api_secret)
-print(data)
+print(bars)
+###########################################################################
+# remember to store sensitive data safe inside an environment variable.   #
+# Do so by exporting the value from the terminal like this:               #
+#              export ALPACA_KEY="******************"                     #
+#  export ALPACA_SECRET="***************************"                     #
+###########################################################################
