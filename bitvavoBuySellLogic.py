@@ -1,5 +1,5 @@
 import os
-from bitvavo import Bitvavo
+from python_bitvavo_api import bitvavo as Bitvavo
 ##############################################################
 # to use first:                                              #
 # export BITVAVO_KEY="*****************"                     #
@@ -34,12 +34,12 @@ The bot runs indefinitely, checking the price every 5 seconds (adjustable via ti
 '''
 
 
-bitvavo = Bitvavo({
+bitvavo = {
     'APIKEY': os.getenv("BITVAVO_KEY"),
     'APISECRET': os.getenv("BITVAVO_SECRET"),
     'RESTURL': 'https://api.bitvavo.com/v2',
     'WSURL': 'wss://ws.bitvavo.com/v2/',
-})
+}
 
 def get_balance(coin):
     """Fetch account balance for a specific cryptocurrency."""
@@ -87,7 +87,7 @@ def trading_bot(pair, balance_coin, threshold=0.01):
             balance = get_balance(balance_coin)
             if balance > 0.001:  # Ensure there’s sufficient balance to buy
                 buy_crypto(pair, balance / current_price)
-                print(f"Bought {balance_coin} as price dropped to {current_price}")
+                print(f"Bought {balance_coin} ( price dropped to {current_price}")
                 starting_price = current_price  # Reset starting price after buying
 
         # Sell logic

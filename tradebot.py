@@ -1,3 +1,4 @@
+import requests
 import logging
 from datetime import datetime
 import pandas as pd
@@ -9,59 +10,60 @@ logging.basicConfig(
     format="%(asctime)s: %(message)s",
     datefmt="%d-%m-%Y %H:%M:%S"
 )
+def fetch_coingecko_historical_data(crypto_id="bitcoin", vs_currency="usd", days="30"):
+    url = f"https://api.coingecko.com/api/v3/coins/{crypto_id}/market_chart"
+    params = {"vs_currency": vs_currency, "days": days}
+    response = requests.get(url, params=params)
+    return response.json()
 
-# Fetch historical data from CoinGecko
-def fetch_coingecko_historical_data(symbol, currency, days=1):
+def fetch_binance_historical_data(symbol="BTCUSD", interval="1d", limit=30):
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    response = requests.get(url, params=params)
+    return response.json()
+
+
+
+# Fetch Data
+def fetch_data():
+    logging.info("Fetching historical and live data...")
     try:
-        url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart"
-        params = {"vs_currency": currency, "days": str(days), "interval": "minutely"}
-        response = requests.get(url, params=params)
-        response.raise_for_status()  # Raise an error for bad status codes
-        data = response.json()
+        historical_data = fetch_coingecko_historical_data("bitcoin", "eur", "90")
+        logging.info(f"Legacy price data: {historical_data}")
+        live_data = fetch_coingecko_data(crypto_id="bitcoin", vs_currency="usd")
+        logging.info(f"price  data today: {live_data}")
+    except Exception as e:
+        logging.error(f"Error fetching data: {e}")
+        raise
+    return historical_data, live_data
 
-        # Extract 'prices' from the API response
-        if "prices" not in data:
-            raise ValueError("Unexpected response format from CoinGecko API.")
-        prices = data["prices"]
-
-        # Convert data to pandas DataFrame
-        df = pd.DataFrame(prices, columns=["timestamp", "price"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        return df
-    except requests.exceptions.RequestException as e:
-        print(f"HTTP Error while fetching data: {e}")
-        traceback.print_exc()
-        return None
-    except ValueError as e:
-        print(f"Data Error: {e}")
-        traceback.print_exc()
-        return None
-
-
+# Preprocess Data
 def preprocess_data(historical_data):
-    logging.info("Prepping data...")
+    logging.info("Preprocessing data...")
     try:
         df = pd.DataFrame(historical_data)
         df['moving_avg'] = moving_average_strategy(df['prices'], window=10)
         df['clusters'] = cluster_prices(df['prices'], n_clusters=3)
-        logging.info("Data preparation completed successfully.")
+        logging.info("using moving average and clustering to preprocess the data.")
     except Exception as e:
-        logging.error(f"Error prepping  data: {e}")
+        logging.error(f"Error during data preparation: {e}")
         raise
     return df
 
+# Train Models
 def train_models(df):
-    logging.info("Training models...")
+    logging.info("Learning...")
     try:
         lstm_model = predict_with_lstm(input_shape=(len(df['prices']), 1))
         logistic_model = predict_with_logistic_regression(df[['prices']], df['clusters'], df[['prices']])
         knn_model = knn_classifier(df[['prices']], df['clusters'], k=5)
-        logging.info("Model training completed successfully.")
+        logging.info("Model ready.")
     except Exception as e:
-        logging.error(f"Error during model training: {e}")
+        logging.error(f"An error occurred during model training: {e}")
         raise
     return lstm_model, logistic_model, knn_model
 
+# Make Predictions
 def make_predictions(models, live_data):
     logging.info("Making predictions...")
     try:
@@ -73,6 +75,7 @@ def make_predictions(models, live_data):
         raise
     return lstm_prediction
 
+# Decide based on prediction
 def decision_making(prediction, live_data):
     logging.info("Making trading decision...")
     try:
@@ -83,39 +86,35 @@ def decision_making(prediction, live_data):
         raise
     return decision
 
+# Execute Trades
 def execute_trades(decision):
     logging.info("Executing trade...")
     try:
         if decision == "buy":
             live_trading()
-            logging.info("Executed BUY trade.")
+            logging.info("Buying...")
         elif decision == "sell":
             live_trading()
-            logging.info("Executed SELL trade.")
+            logging.info("Selling...")
         else:
-            logging.info("No trade executed. Decision was HOLD.")
+            logging.info("Holding...")
     except Exception as e:
         logging.error(f"Error during trade execution: {e}")
         raise
 
+# Main Function
 def main():
-    logging.info("Trade bot Start")
+    logging.info("Requesting data...")
     try:
-        logging.info("Fetching historical data from coingecko")
-        historical_data, live_data = fetch_coingecko_historical_data()
-        logging.info("Preprocess historical data ...")
+        historical_data, live_data = fetch_data()
         df = preprocess_data(historical_data)
-        logging.info("Training ML Models")
         models = train_models(df)
-        logging.info("Begin the next price prediction process.")
         prediction = make_predictions(models, live_data)
-        logging.info("Decide strategy")
         decision = decision_making(prediction, live_data)
-        logging.info("Use all of the above data for the automated trading process.")
         execute_trades(decision)
-        logging.info("script completed.")
+        logging.info("Trading bot is terminating.")
     except Exception as e:
-        logging.error(f"Critical error in trading bot: {e}")
+        logging.error(f"error: {e}")
 
 if __name__ == "__main__":
     main()
