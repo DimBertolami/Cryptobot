@@ -22,7 +22,7 @@ time.sleep(3)
 elapsed_time = time.time() - start_time
 
 #                   ##############################################################
-duration = 30       # 5 minutes in seconds                                       #
+duration = 23       # 5 minutes in seconds                                       #
 INTERVAL = "5m"     # 1m, 5m, 30m, 1h, 10h, 8d, 30d, ...                         #
 COUNTER = 0         # progress (^.^) (counter) in seconds..                      #
 SYMBOL = "BTC-USD"  # cryptoID /   \ currency                                    #
@@ -235,9 +235,9 @@ def make_decision(latest_price, predicted_price, threshold):
             return "HOLD"
 
         profit_margin = predicted_price - latest_price
-        if profit_margin > 0 and profit_margin / latest_price >= threshold:
+        if profit_margin > 0 and profit_margin / latest_price > threshold:
             result = "BUY"
-        elif profit_margin < 0 and abs(profit_margin) / latest_price >= threshold:
+        elif profit_margin < 0 and abs(profit_margin) / latest_price > threshold:
             result = "SELL"
         else:
             result = "HOLD"
@@ -296,7 +296,10 @@ def live_trading(use_random_forest=True, source="yfinance"):
         time.sleep(1)
         elapsed_time = time.time() - start_time
         print(f"time elapsed: {elapsed_time}")
-        model = rf_model
+
+    #choose a model
+    model = train_random_forest(df) if use_random_forest else train_linear_regression(df)
+
     if model is None:
         log_message(action, "Model training failed. Exiting.")
         return
@@ -306,7 +309,8 @@ def live_trading(use_random_forest=True, source="yfinance"):
     # Decision-making loop (simulate live trading)
     for i in range(len(df) - 1):  # Loop through historical data
         try:
-            latest_price = df["Close"].iloc[i]
+            latest_price = df["Close"].iloc[i].item() 
+            #latest_price = df["Close"].iloc[i]
             features = df[["Open", "High", "Low", "Close", "Volume"]].iloc[i].values.reshape(1, -1)
             predicted_price = model.predict(features)[0]  # Predicted price as scalar
             profit_margin = predicted_price - latest_price
@@ -316,7 +320,7 @@ def live_trading(use_random_forest=True, source="yfinance"):
             print(f"Profit Margin: {profit_margin:.2f} - Decision: {decision}")
             elapsed_time = time.time() - start_time
             print(f"elapsed time: {elapsed_time}")
-            # Delay between iterations
+           # Delay between iterations
             time.sleep(2)
 
         except Exception as e:
