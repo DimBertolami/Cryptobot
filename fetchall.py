@@ -327,6 +327,7 @@ def fetch_bitvavo_data(symbol='BTC-EUR', interval='1d', start_date="2024-03-15",
         params['start'] = int(pd.to_datetime(start_date).timestamp() * 1000)
     if end_date:
         params['end'] = int(pd.to_datetime(end_date).timestamp() * 1000)
+#    response = bitvavo.candles({'market': symbol, 'interval': interval "1d"})
     response = bitvavo.candles(params['market'], params['interval'], params)
     data = pd.DataFrame(response, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     data['close'] = pd.to_numeric(data['close'], errors='coerce')
@@ -336,9 +337,9 @@ def fetch_bitvavo_data(symbol='BTC-EUR', interval='1d', start_date="2024-03-15",
     return data
 
 # Sample DataFrame
-#df = pd.DataFrame({
-#    'close': [45.15, 46.30, 47.45, 46.85, 45.75, 44.95, 43.85, 45.00, 46.10, 46.90]
-#})
+df = pd.DataFrame({
+    'close': [45.15, 46.30, 47.45, 46.85, 45.75, 44.95, 43.85, 45.00, 46.10, 46.90]
+})
 
 
 # create technical indicators and preprocess data 
@@ -395,29 +396,25 @@ data = fe_preprocess(exch='binance')
 data = fe_preprocess(exch='bitvavo')
 
 for i in range(364):  # Loop from 0 to 4
-    value = data['target'].iloc[i]
-    if i == 364: 
-        break
-    if value == 1:
-        print(f"{i}: buy")
-#        break
-    if value == 0:
-        print(f"{i}: hold")
-#        break
-    if value == -1:
-        print(f"{i}: sell")
-#        break
+    for j in range(4):
+        value = data['target'].iloc[j]
+        if i == 364: 
+            break
+        if value == 1:
+            print(f"{j}: buy")
+            print(f"{j}:SMA          {data['SMA14']}")
+            print(f"{j}:EMA14        {data['EMA14']}")
+            print(f"{j}:EMA          {data['EMA']}")
+            print(f"{j}:RSI          {data['RSI']}")
+            print(f"{j}:MACD         {data['MACD']}")
+            print(f"{j}:UpperBand    {data['UpperBand']}")
+            print(f"{j}:MiddleBand   {data['MiddleBand']}")
+            print(f"{j}:LowerBand    {data['LowerBand']}")
+        if value == 0:
+            print(f"{j}: hold")
+        if value == -1:
+            print(f"{j}: sell")
 
-'''
-    print(f"SMA          {data['SMA14']}")
-    print(f"EMA14        {data['EMA14']}")
-    print(f"EMA          {data['EMA']}")
-    print(f"RSI          {data['RSI']}")
-    print(f"MACD         {data['MACD']}")
-    print(f"UpperBand    {data['UpperBand']}")
-    print(f"MiddleBand   {data['MiddleBand']}")
-    print(f"LowerBand    {data['LowerBand']}")
-'''
 
 plt.title(' Historical Crypto Price data(By Dimi Bertolami)')
 plt.xlabel('Date')
