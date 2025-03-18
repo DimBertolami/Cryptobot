@@ -13,21 +13,22 @@
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+import yfinance as yf
+from ta.utils import dropna
 from datetime import datetime
 import matplotlib.pyplot as plt
 import requests, talib, json, os
-from ta.utils import dropna
 from ta import add_all_ta_features
 from ta.volatility import BollingerBands
 from python_bitvavo_api.bitvavo import Bitvavo
 from binance.client import Client as BinanceClient
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import accuracy_score, classification_report
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Conv1D, MaxPooling1D, Flatten
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import Adam
 
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
@@ -35,100 +36,6 @@ BITVAVO_API_KEY = os.getenv("BITVAVO_API_KEY")
 BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
 ALPACA_API_KEY =  os.getenv('ALPACA_API_KEY')
 ALPACA_API_SECRET = os.getenv('ALPACA_API_SECRET')
-
-class TradingEnvironment:
-    def __init__(self, data, lookback=60):
-        self.data = data
-        self.lookback = lookback
-        self.current_step = 0
-        self.balance = 1000  # Starting balance
-        self.position = 0  # 0 = no position, 1 = holding asset
-        self.action_space = 3  # Buy, Hold, Sell
-        self.state = self.reset()
-
-    def reset(self):
-        self.current_step = self.lookback
-        self.balance = 1000
-        self.position = 0
-        return self.data[self.current_step - self.lookback: self.current_step]
-
-    def step(self, action):
-        reward = 0
-        done = False
-        prev_balance = self.balance
-
-        # Action: 0 = Buy, 1 = Hold, 2 = Sell
-        current_price = self.data[self.current_step, 0]
-
-        if action == 0:  # Buy
-            if self.balance >= current_price:
-                self.balance -= current_price
-                self.position = 1  # Holding the asset
-
-        elif action == 2:  # Sell
-            if self.position == 1:
-                self.balance += current_price
-                self.position = 0
-
-        # Reward is based on the difference in balance
-        reward = self.balance - prev_balance
-        self.current_step += 1
-
-        if self.current_step >= len(self.data) - 1:
-            done = True
-
-        next_state = self.data[self.current_step - self.lookback: self.current_step]
-        return next_state, reward, done
-
-class DQNAgent:
-    def __init__(self, state_size, action_size):
-        self.state_size = state_size
-        self.action_size = action_size
-        self.memory = deque(maxlen=2000)
-        self.model = self._build_model()
-        self.target_model = self._build_model()
-        self.target_model.set_weights(self.model.get_weights())
-        self.optimizer = Adam(lr=0.001)
-        self.gamma = 0.95  # Discount factor
-        self.epsilon = 1.0  # Exploration-exploitation trade-off
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.batch_size = 32
-
-    def _build_model(self):
-        model = Sequential()
-        model.add(Dense(64, input_dim=self.state_size, activation='relu'))
-        model.add(Dense(64, activation='relu'))
-        model.add(Dense(self.action_size, activation='linear'))
-        model.compile(optimizer=self.optimizer, loss='mse')
-        return model
-
-    def act(self, state):
-        if np.random.rand() <= self.epsilon:
-            return random.randrange(self.action_size)
-        state = np.reshape(state, [1, self.state_size])
-        q_values = self.model.predict(state)
-        return np.argmax(q_values[0])
-
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
-
-    def replay(self):
-        if len(self.memory) < self.batch_size:
-            return
-        batch = random.sample(self.memory, self.batch_size)
-        for state, action, reward, next_state, done in batch:
-            target = reward
-            if not done:
-                target += self.gamma * np.max(self.target_model.predict(np.reshape(next_state, [1, self.state_size]))[0])
-            target_f = self.model.predict(np.reshape(state, [1, self.state_size]))
-            target_f[0][action] = target
-            self.model.fit(np.reshape(state, [1, self.state_size]), target_f, epochs=1, verbose=0)
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
-    def update_target_model(self):
-        self.target_model.set_weights(self.model.get_weights())
 
 '''
 Decision Trees and Random Forests
@@ -321,54 +228,58 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1d', lookback='365 days ago U
 
 # fetch historical data from bitvavo and return a dataframe
 def fetch_bitvavo_data(symbol='BTC-EUR', interval='1d', start_date="2024-03-15", end_date="2025-03-15"):
-    bitvavo = Bitvavo({'APIKEY': BITVAVO_API_KEY,'APISECRET': BITVAVO_API_SECRET})    
+    bitvavo = Bitvavo({'APIKEY': BITVAVO_API_KEY,'APISECRET': BITVAVO_API_SECRET})
     params = {'market': symbol, 'interval': interval}
     if start_date:
         params['start'] = int(pd.to_datetime(start_date).timestamp() * 1000)
     if end_date:
         params['end'] = int(pd.to_datetime(end_date).timestamp() * 1000)
-#    response = bitvavo.candles({'market': symbol, 'interval': interval "1d"})
     response = bitvavo.candles(params['market'], params['interval'], params)
     data = pd.DataFrame(response, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     data['close'] = pd.to_numeric(data['close'], errors='coerce')
-    data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
     data['close'] = data['close'].astype(float)
+    data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
     bitvavo_data = data
     return data
 
-# Sample DataFrame
-df = pd.DataFrame({
-    'close': [45.15, 46.30, 47.45, 46.85, 45.75, 44.95, 43.85, 45.00, 46.10, 46.90]
-})
+# Fetch historical data from yahoo finance, returning a dataframe
+def fetch_yfinance_data(symbol='BTC-USD', interval='1d', period="365"):
+    try:
+        data= yf.download(tickers=symbol, interval=interval, period=period)
+        print(f"Successfully fetched {len(data)} rows.")
+        data.columns = data.columns.get_level_values(0)
+        data = data.reset_index()  # Ensure 'Date' is a normal column
+        data = data.rename(columns={'Date': 'timestamp'})
+        data.columns = [col.lower() for col in data.columns]
+        numeric_cols = ['close', 'high', 'low', 'open', 'volume']
+        data['close'] = pd.to_numeric(data['close'], errors='coerce')
+        data['close'] = data['close'].astype(float)
+        data['timestamp'] = pd.to_datetime(data['timestamp'])
+        return data
+    except Exception as e:
+        result = f"Error fetching data: {e}"
+        return None
 
-
-# create technical indicators and preprocess data 
-# Features (technical indicators)  features = ['SMA14', 'EMA14', 'EMA', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
-# symbol can be for binance or bitvavo (please note that they are written differently)
-# Binance: symbol = 'BTCUSDT'
-# Bitvavo: symbol = 'BTC-EUR'
 def fe_preprocess(exch="binance"):
 
   if exch=='binance':
     print('receiving Binance data, calculating indicators')
     binance_data = fetch_binance_data()
     binance_data = calculate_indicators(binance_data)
-    print(binance_data.head())                                                                                                  # just for show
     features = ['SMA', 'EMA14', 'EMA', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'] 					# technical indicators
     scaler1 = MinMaxScaler()													# start the scaler
     binance_data[features] = scaler1.fit_transform(binance_data[features])							# apply the technical indicators to the scaler
     binance_data['target'] = binance_data['close'].shift(-1) > binance_data['close']
     binance_data['target'] = binance_data['target'].astype(int)									# force dataframe's target as type int
     binance_data['target'] = binance_data['target'].apply(lambda x: 1 if x == 1 else -1)					# Target variable (Buy=1, Hold=0, Sell=-1)
-    binance_data['close'].fillna(0) 		                                                                        # Fill NaN values with the last valid observation
-    plt.plot(binance_data['timestamp'], binance_data['close'], label='Binance BTC/USDT')
+    binance_data['close'].fillna(0) 		                                                                       	 	# Fill NaN values with the last valid observation
+    print(binance_data)                                                                                                  	# just for show
     return binance_data
 
   if exch=='bitvavo':
     print('receiving Bitvavo data, calculating indicators')
     bitvavo_data = fetch_bitvavo_data()
     bitvavo_data = calculate_indicators(bitvavo_data)
-    print(bitvavo_data.head())                                                                                                  # just for show
     features = ['SMA14', 'EMA14', 'EMA', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'] 				# technical indicators
     scaler2 = MinMaxScaler()													# start the scaler
     bitvavo_data[features] = scaler2.fit_transform(bitvavo_data[features])							# apply the technical indicators to the scaler
@@ -376,58 +287,59 @@ def fe_preprocess(exch="binance"):
     bitvavo_data['target'] = bitvavo_data['target'].astype(int)									# force dataframe's target as type int
     bitvavo_data['target'] = bitvavo_data['target'].apply(lambda x: 1 if x == 1 else -1)					# Target variable (Buy=1, Hold=0, Sell=-1)
     bitvavo_data['close'].fillna(0) 		                                                                        # Fill NaN values with the last valid observation
-    plt.plot(bitvavo_data['timestamp'], bitvavo_data['close'], label= 'Bivavo BTC/EUR')
+    print(bitvavo_data)                                                                                                  	# just for show
     return bitvavo_data
 
-##############################################################################################################################
-#########################################  Here 's where the magic begins ####################################################
-##############################################################################################################################
-#plt.switch_backend('Agg')  # Or 'Agg', 'Qt5Agg', etc.
-'''
-    print(f"dataframe shape: {data.shape}")  # For DataFrame
-    print(f"length: {len(data)}")   # For Series or list
-    print(f"index: {data.index}")
-    print(f"columns: {data.columns}")
-    print(f"target data: {data['target'].iloc[i]}") 
-'''
+  if exch=='yahoofinance':
+    print('receiving Yahoo Financial data, calculating indicators')
+    yf_data = fetch_yfinance_data(symbol='ETH-USD', interval="1d", period="1y")
+    yf_data = calculate_indicators(yf_data)
+    features = ['SMA14', 'EMA14', 'EMA', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']                                 # technical indicators
+    scaler3 = MinMaxScaler()                                                                                                # start the scaler
+    yf_data[features] = scaler3.fit_transform(yf_data[features])
+    yf_data['target'] = yf_data['close'].shift(-1) > yf_data['close']
+    yf_data['target'] = yf_data['target'].astype(int)
+    yf_data['target'] = yf_data['target'].apply(lambda x: 1 if x == 1 else -1)
+    yf_data['close'].fillna(0)
+    print(yf_data)
+    return yf_data
 
-plt.figure(figsize=(12, 6))
-data = fe_preprocess(exch='binance')
-data = fe_preprocess(exch='bitvavo')
+# plotting function to display each exchange separately
+# linestyles: 	linestyle='dashdot',  linestyle='dashed', linestyle='dotted', (linestyle='solid' = used for the exchange price data)
+# 'SMA14' (or SMA for binance), 'EMA14', 'EMA', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'
+def plot_exchange_data(data, exchange_name, color):
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+    plt.switch_backend('Qt5Agg')  # Or 'Agg', 'Qt5Agg', etc.
+    # Plot price data
+    ax1.plot(data['timestamp'], data['close'], label=f'{exchange_name} BTC', color=color)
+    # Plot key indicators on a secondary y-axis
+    ax2 = ax1.twinx()
+    if exchange_name=="binance":
+        ax2.plot(data['timestamp'], data['SMA'], label='SMA', linestyle='dashed', color='purple')
+    else:
+        ax2.plot(data['timestamp'], data['SMA14'], label='SMA14', linestyle='dashed', color='purple')
 
-for i in range(364):  # Loop from 0 to 4
-    for j in range(4):
-        value = data['target'].iloc[j]
-        if i == 364: 
-            break
-        if value == 1:
-            print(f"{j}: buy")
-            print(f"{j}:SMA          {data['SMA14']}")
-            print(f"{j}:EMA14        {data['EMA14']}")
-            print(f"{j}:EMA          {data['EMA']}")
-            print(f"{j}:RSI          {data['RSI']}")
-            print(f"{j}:MACD         {data['MACD']}")
-            print(f"{j}:UpperBand    {data['UpperBand']}")
-            print(f"{j}:MiddleBand   {data['MiddleBand']}")
-            print(f"{j}:LowerBand    {data['LowerBand']}")
-        if value == 0:
-            print(f"{j}: hold")
-        if value == -1:
-            print(f"{j}: sell")
+    ax2.plot(data['timestamp'], data['EMA14'], label='EMA14', linestyle='dotted', color='red')
+    ax2.plot(data['timestamp'], data['MACD'], label='MACD', linestyle='dashed', color='black')
+    ax2.plot(data['timestamp'], data['RSI'], label='RSI', linestyle='dashdot', color='aquamarine')
+    ax2.plot(data['timestamp'], data['UpperBand'], label='UpperBand', linestyle=(0, (5, 2)), color='chocolate')
+    ax2.plot(data['timestamp'], data['MiddleBand'], label='MiddleBand', linestyle=(0, (5, 10)), color='darkgoldenrod')
+    ax2.plot(data['timestamp'], data['LowerBand'], label='LowerBand', linestyle=(0, (10, 5)), color='gold')
 
+    # Labels & Legends
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Price')
+    ax2.set_ylabel('Indicators')
+    ax1.legend(loc='upper left')
+    ax2.legend(loc='upper right')
+    plt.title(f'Historical Crypto Data: {exchange_name}')
+    plt.show()
 
-plt.title(' Historical Crypto Price data(By Dimi Bertolami)')
-plt.xlabel('Date')
-plt.ylabel('Price (usd or eur)')
-plt.legend()
-plt.show()
+binance_data = fe_preprocess(exch='binance')
+bitvavo_data = fe_preprocess(exch='bitvavo')
+yf_data = fe_preprocess(exch='yahoofinance')
+# Plot data separately for each exchange
+plot_exchange_data(binance_data, "Binance", "blue")
+plot_exchange_data(bitvavo_data, "Bitvavo", "orange")
+plot_exchange_data(yf_data, "YahooFinance", "green")
 
-'''
-    value = bitvavo_data['target'].iloc[i]
-    if value == 1:
-        print(f"{i} buy  {bitvavo_data['SMA']} / {binance_data['EMA']} / {binance_data['RSI']}")
-    if value == 0:
-        print("{i}: hold {bitvavo_data['SMA']} / {binance_data['EMA']} / {binance_data['RSI']}")
-    if value == -1:
-        print("{i}: sell {bitvavo_data['SMA']} / {binance_data['EMA']} / {binance_data['RSI']}")
-'''
