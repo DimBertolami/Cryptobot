@@ -1,4 +1,8 @@
-python-binance
-TA-Lib
 numpy
-websocket_client
+pandas
+matplotlib
+seaborn
+plotly
+scikit-learn
+xgboost
+tensorflow
