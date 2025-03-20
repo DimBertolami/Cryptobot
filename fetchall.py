@@ -39,6 +39,7 @@ from ta import add_all_ta_features
 from ta.volatility import BollingerBands
 from python_bitvavo_api.bitvavo import Bitvavo
 from binance.client import Client as BinanceClient
+from sklearn.datasets import make_classification
 from sklearn.linear_model import LinearRegression
 from sklearn.linear_model import Ridge
 from sklearn.linear_model import Lasso
@@ -100,6 +101,22 @@ def train_model(model, X_train, y_train):
     model.fit(X_train, y_train)
     return model
 
+# Train Random Forest
+def train_Random_Forest(X_train, y_train, n_estimators=100):
+#    feature_names = [f"feature {i}" for i in range(X.shape[1])]
+#    forest = RandomForestClassifier(random_state=0)
+#    forest.fit(X_train, y_train)
+
+    model = RandomForestClassifier(n_estimators=n_estimators)
+    model.fit(X_train, y_train)
+    return model
+
+# Train XGBoost
+#def train_xgboost(X_train, y_train):
+#    model = xgb.XGBClassifier(objective='binary:logistic', use_label_encoder=False, eval_metric='logloss')
+#    model.fit(X_train, y_train)
+#    return model
+
 def train_xgboost(X_train, y_train):
     y_train = y_train.replace({-1: 0, 1: 1, 0: 2})  # Ensure labels start at 0
     model = xgb.XGBClassifier(objective='multi:softmax', num_class=3, eval_metric='mlogloss', n_estimators=100, max_depth=6, max_leaves=0)
@@ -107,8 +124,8 @@ def train_xgboost(X_train, y_train):
     return model
 
 # Train LSTM
-def train_LSTM(X_train, y_train, lookback=365, units=50, epochs=10):
-    timesteps=40           # dimensionality of the input sequence
+def train_LSTM(X_train, y_train, lookback=730, units=50, epochs=100):
+    timesteps=400           # dimensionality of the input sequence
     features=3            # dimensionality of each input representation in the sequence
     LSTMoutputDimension = 2 # dimensionality of the LSTM outputs (Hidden & Cell states)
 
@@ -126,29 +143,24 @@ def train_LSTM(X_train, y_train, lookback=365, units=50, epochs=10):
     print("U", U.shape)
     print("b", b.shape)
     model_LSTM.summary()
-    #model = TimeDistributed([
-    #    LSTM(units, return_sequences=True, input_shape=(X_train.shape[1], 1)),
-    #    LSTM(units),
-    #    Dense(1, activation='sigmoid')
-    #])
     model = Sequential([
         LSTM(units, return_sequences=True, input_shape=(X_train.shape[1], 1)),
         LSTM(units),
         Dense(1, activation='sigmoid')
     ])
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=0)
+    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=1)
     return model
 
 # Train CNN
-def train_CNN(X_train, y_train, filters=64, kernel_size=2, epochs=10):
+def train_CNN(X_train, y_train, filters=64, kernel_size=2, epochs=100):
     model = Sequential([
         Conv1D(filters, kernel_size, activation='relu', input_shape=(X_train.shape[1], 1)),
         Flatten(),
         Dense(1, activation='sigmoid')
     ])
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=0)
+    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=1)
     return model
 
 def make_decision(model, X_test):
@@ -177,13 +189,13 @@ def make_decision(models, X_test):
     final_decision = np.round(predictions.mean(axis=0))
     return final_decision
 '''
-def apply_risk_management(predictions, stop_loss=0.02, take_profit=0.05):
+def apply_risk_management(predictions): #, stop_loss=0.02, take_profit=0.05):
     decisions = []
     for pred in predictions:
         pred = int(round(pred))  # Ensure integer output (no floating-point issues)
         if pred == 1:
             decisions.append("BUY")
-        elif pred == -1:
+        elif pred == 2:   #-1
             decisions.append("SELL")
         else:
             decisions.append("HOLD")
@@ -214,12 +226,13 @@ def apply_risk_management(predictions, stop_loss=0.02, take_profit=0.05):
 """
 # Visualization Functions
 def plot_signals(df, predictions):
-    df['Decision'] = predictions
+    print(df)
+    df['decision'] = predictions
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name='Price'))
-    fig.add_trace(go.Scatter(x=df[df['Decision'] == 1].index, y=df[df['Decision'] == 1]['Close'], mode='markers', marker=dict(color='green', size=8), name='BUY'))
-    fig.add_trace(go.Scatter(x=df[df['Decision'] == -1].index, y=df[df['Decision'] == -1]['Close'], mode='markers', marker=dict(color='red', size=8), name='SELL'))
-    fig.update_layout(title='Trading Signals', xaxis_title='Time', yaxis_title='Price')
+    fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='price'))
+    fig.add_trace(go.Scatter(x=df[df['decision'] == 1].index, y=df[df['decision'] == 1]['close'], mode='markers', marker=dict(color='green', size=8), name='BUY'))
+    fig.add_trace(go.Scatter(x=df[df['decision'] == -1].index, y=df[df['decision'] == -1]['close'], mode='markers', marker=dict(color='red', size=8), name='SELL'))
+    fig.update_layout(title='Trading Signals', xaxis_title='time', yaxis_title='price')
     fig.show()
 
 def plot_feature_importance(model, features):
@@ -313,7 +326,7 @@ def fe_preprocess(exch="binance"):
     binance_data['target'] = binance_data['target'].astype(int)									# force dataframe's target as type int
     binance_data['target'] = binance_data['target'].apply(lambda x: 1 if x == 1 else -1)					# Target variable (Buy=1, Hold=0, Sell=-1)
     binance_data['close'].fillna(0) 		                                                                       	 	# Fill NaN values with the last valid observation
-    #print(binance_data)                                                                                                  	# just for show
+    print(binance_data)                                                                                                  	# just for show
     return binance_data
 
   if exch=='bitvavo':
@@ -355,20 +368,21 @@ def fe_preprocess(exch="binance"):
 # 'SMA14' (or SMA for binance), 'EMA14', 'EMA', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'
 
 # Visualization Function
-def plot_exchange_data(data, exchange_name, color):
+def plot_exchange_data(data, exchange_name, color='black', model=None, features=None, predictions=None):
     fig, ax1 = plt.subplots(figsize=(12, 6))
     # Plot price data
     ax1.plot(data['timestamp'], data['close'], label=f'{exchange_name} BTC', color=color)
-    ax1.set_xlabel('Date')
-    ax1.set_ylabel('Price')
+    ax1.set_xlabel('date')
+    ax1.set_ylabel('price')
     ax1.legend(loc='upper left')
+    
     # Plot key indicators on a secondary y-axis
     ax2 = ax1.twinx()
     if exchange_name == "binance":
         ax2.plot(data['timestamp'], data['SMA'], label='SMA', linestyle='dashed', color='pink')
     else:
         ax2.plot(data['timestamp'], data['SMA14'], label='SMA14', linestyle='dashed', color='pink')
-
+    
     ax2.plot(data['timestamp'], data['EMA14'], label='EMA14', linestyle='dotted', color='yellow')
     ax2.plot(data['timestamp'], data['MACD'], label='MACD', linestyle='dashed', color='orange')
     ax2.plot(data['timestamp'], data['RSI'], label='RSI', linestyle='dashdot', color='aquamarine')
@@ -377,12 +391,24 @@ def plot_exchange_data(data, exchange_name, color):
     ax2.plot(data['timestamp'], data['LowerBand'], label='LowerBand', linestyle=(0, (10, 5)), color='gold')
     ax2.set_ylabel('Indicators')
     ax2.legend(loc='upper right')
-    plt.title(f'Historical Crypto Data: {exchange_name}')
+    plt.title(f"Dimi's Historical Crypto Data fetched from {exchange_name}!")
     plt.show()
+    
+    # Additional Visualizations
+    #plot_signals(data, predictions)
+    #plot_feature_importance(model, features)
+    #plot_cumulative_returns(data, predictions)
 
 binance_data = fe_preprocess(exch='binance')
 features = ['SMA', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
+
+#X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=42)
 X_train, X_test, y_train, y_test = split_data(binance_data, features, 'target')
+#feature_names = [f"feature {i}" for i in range(X.shape[1])]
+feature_names = features
+forest = RandomForestClassifier(random_state=0)
+forest.fit(X_train, y_train)
+
 rf_model = train_model(RandomForestClassifier, X_train, y_train)
 lstm_model = train_LSTM(X_train, y_train)
 cnn_model = train_CNN(X_train, y_train)
@@ -397,6 +423,7 @@ decisions = make_decision(models, X_train)
 print("decisions: ", decisions)
 final_trades = apply_risk_management(decisions)
 print("final trade decisions: ", final_trades)
+plot_exchange_data(binance_data, "binance", "black", model=rf_model, features=['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=decisions)
 
 
 bitvavo_data = fe_preprocess(exch='bitvavo')
@@ -415,9 +442,10 @@ DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
 RFR_model = train_model(RandomForestRegressor,  X_train, y_train)
 models = [rf_model, lstm_model, cnn_model, lr_model, LR_model, KNC_model, DTC_model, DTR_model, RFR_model]
 decisions = make_decision(models, X_train)
-print("decisions: ", decisions)
+#print("decisions: ", decisions)
 final_trades = apply_risk_management(decisions)
-print("final trade decisions: ", final_trades)
+#print("final trade decisions: ", final_trades)
+plot_exchange_data(bitvavo_data, "Bitvavo", "black", model=lstm_model, features=['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=decisions)
 
 yf_data = fe_preprocess(exch='yahoofinance')
 features = ['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
@@ -440,7 +468,8 @@ decisions = make_decision(models, X_train)
 print("decisions: ", decisions)
 final_trades = apply_risk_management(decisions)
 print("final trade decisions: ", final_trades)
-print(final_trades)
+plot_exchange_data(yf_data, "YahooFinance", "black", model=lstm_model, features=['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=decisions)
+#print(final_trades)
 
 #models = [rf_model, lstm_model]
 #decisions = make_decision(lstm_model, X_test)
@@ -448,7 +477,8 @@ print(final_trades)
 #print(final_trades)
 
 # Plot data separately for each exchange
-plot_exchange_data(binance_data, "Binance", "black")
-plot_exchange_data(bitvavo_data, "Bitvavo", "black")
-plot_exchange_data(yf_data, "YahooFinance", "black")
+#plot_exchange_data(binance_data, "Binance", "black")
+#plot_exchange_data(binance_data, "binance", "black", model=lstm_model, features=['SMA', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=decisions)
+#plot_exchange_data(bitvavo_data, "Bitvavo", "black", model=lstm_model, features=['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=decisions)
+#plot_exchange_data(yf_data, "YahooFinance", "black", model=lstm_model, features=['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=decisions)
 
