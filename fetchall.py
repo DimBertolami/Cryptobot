@@ -1,5 +1,23 @@
 '''	Author: Dimi Bertolami										   date: 16-03-2025
         ----------------------										   ----------------
+1.0)    This bot came to life after realising that I suck at guessing which cryptocurrency is going to make me profit
+1.1) 	install required packages
+1.2) 	fetch historical price data and technical indicators.
+2)   	Feature Engineering: Create features based on historical data and technical indicators (e.g., RSI, moving averages).
+3)   	preprocess the datait for machine learning (model training for example normalize, generate technical indicators).
+4)   	Train machine learning mode  (LSTM, Decision Trees, or RL agent).
+5)   	Evaluate the models on a validation dataset or new data using metrics such as accuracy, precision, recall (for classification models), or profitability (for RL).
+6)   	Use the model's predictions to implement a Buy/Hold/Sell strategy.
+
+Explanation of Dependencies:
+	numpy → Array operations
+	pandas → Data manipulation
+	matplotlib → Static plotting
+	seaborn → Enhanced visualizations
+	plotly → Interactive charts
+	scikit-learn → ML utilities (RandomForest, train_test_split)
+	xgboost → XGBoost model
+	tensorflow → Deep learning models (LSTM, CNN)
 '''
 
 import os
@@ -10,36 +28,37 @@ import pandas as pd
 import xgboost as xgb
 import yfinance as yf
 import seaborn as sns
-import tensorflow as tf
 from ta.utils import dropna
-import requests, talib, json
 from datetime import datetime
 from collections import deque
 import matplotlib.pyplot as plt
+import requests, talib, json
 import plotly.graph_objects as go
+import tensorflow as tf
 from ta import add_all_ta_features
 from ta.volatility import BollingerBands
 from python_bitvavo_api.bitvavo import Bitvavo
 from binance.client import Client as BinanceClient
-from sklearn.linear_model import Ridge
-from sklearn.linear_model import Lasso
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.datasets import make_classification
 from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Ridge
+from sklearn.linear_model import Lasso
+from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras import Input
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.layers import LSTM, Dense, Conv1D, MaxPooling1D, Flatten, Dropout, TimeDistributed, RepeatVector, Bidirectional
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.optimizers import Adam
 
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-warnings.filterwarnings('ignore')
+
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable TensorFlow oneDNN warning
+warnings.filterwarnings('ignore')  # Suppress minor warnings
 
 device_name = tf.test.gpu_device_name()
 if device_name != '/device:GPU:0':
@@ -54,36 +73,60 @@ BITVAVO_API_SECRET = os.getenv("BITVAVO_API_SECRET")
 ALPACA_API_KEY =  os.getenv('ALPACA_API_KEY')
 ALPACA_API_SECRET = os.getenv('ALPACA_API_SECRET')
 
+# Split Data
 def split_data(df, features, target):
     X = df[features]
-    y = df[target].replace({-1: 2})
+    y = df[target].replace({-1: 2})  # Map SELL (-1) to 2 to preserve the signal
+                                     #    y = df[target].replace(-1, 0)  # Convert -1 to 0 for binary classification
     y = df[target]
     return train_test_split(X, y, test_size=0.2, shuffle=False)
 
+'''
+lr_model = train_model(LinearRegression, X_train, y_train)
+LR_model = train_model(LogisticRegression, X_train, y_train)
+KNC_model = train_model(KNeighborsClassifier, X_train, y_train)
+DTC_model = train_model(DecisionTreeClassifier, X_train, y_train)
+DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
+RFR_model = train_model(RandomForestRegressor,  X_train, y_train)
+
+'''
 def train_model(model, X_train, y_train):
     boolattributes = hasattr(model, 'n_estimators')
-    if model=="LinearRegression" or boolattributes!=False:
+    if model=="LinearRegression" or boolattributes==False:
         model = model()
     if boolattributes:
         model = model(n_estimators=100)
     model.fit(X_train, y_train)
     return model
 
+# Train Random Forest
 def train_Random_Forest(X_train, y_train, n_estimators=100):
+#    feature_names = [f"feature {i}" for i in range(X.shape[1])]
+#    forest = RandomForestClassifier(random_state=0)
+#    forest.fit(X_train, y_train)
+
     model = RandomForestClassifier(n_estimators=n_estimators)
     model.fit(X_train, y_train)
     return model
 
+# Train XGBoost
+#def train_xgboost(X_train, y_train):
+#    model = xgb.XGBClassifier(objective='binary:logistic', use_label_encoder=False, eval_metric='logloss')
+#    model.fit(X_train, y_train)
+#    return model
+
 def train_xgboost(X_train, y_train):
-    y_train = y_train.replace({-1: 0, 1: 1, 0: 2})
-    model = xgb.XGBClassifier(objective='multi:softmax', num_class=3, eval_metric='mlogloss', n_estimators=100, max_depth=6, max_leaves=0)
+    y_train = y_train.replace({-1: 0, 1: 1, 0: 2})  # Ensure labels start at 0
+    model = xgb.XGBClassifier(objective='multi:softmax', num_class=2, eval_metric='mlogloss', n_estimators=100, max_depth=3, max_leaves=5)
     model.fit(X_train, y_train)
     return model
 
+# Train LSTM
 def train_LSTM(X_train, y_train, lookback=730, units=50, epochs=100):
-    timesteps=400
-    features=2
-    LSTMoutputDimension = 1
+    timesteps=400           # dimensionality of the input sequence
+    features=3            # dimensionality of each input representation in the sequence
+    LSTMoutputDimension = 2 # dimensionality of the LSTM outputs (Hidden & Cell states)
+
     input = Input(shape=(timesteps, features))
     output= LSTM(LSTMoutputDimension)(input)
     model_LSTM = Model(inputs=input, outputs=output)
@@ -98,112 +141,94 @@ def train_LSTM(X_train, y_train, lookback=730, units=50, epochs=100):
     print("U", U.shape)
     print("b", b.shape)
     model_LSTM.summary()
-    model = Sequential([LSTM(units, return_sequences=True, input_shape=(X_train.shape[1], 1)), LSTM(units), Dense(1, activation='sigmoid')])
+    model = Sequential([
+        LSTM(units, return_sequences=True, input_shape=(X_train.shape[1], 1)),
+        LSTM(units),
+        Dense(1, activation='sigmoid')
+    ])
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=0)
+    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=1)
     return model
 
+# Train CNN
 def train_CNN(X_train, y_train, filters=64, kernel_size=2, epochs=100):
-    model = Sequential([Conv1D(filters, kernel_size, activation='relu', input_shape=(X_train.shape[1], 1)), Flatten(), Dense(1, activation='sigmoid')])
+    model = Sequential([
+        Conv1D(filters, kernel_size, activation='relu', input_shape=(X_train.shape[1], 1)),
+        Flatten(),
+        Dense(1, activation='sigmoid')
+    ])
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=0)
+    model.fit(X_train, y_train, epochs=epochs, batch_size=32, verbose=1)
     return model
 
 def make_decision(model, X_test):
     predictions = []
+
     for model in models:
         print("model: ", model)
         pred = model.predict(X_test)
         print("prediction: ", pred)
-        if isinstance(pred, list):
+        if isinstance(pred, list):  # Ensure numpy array format
             pred = np.array(pred)
-        if len(pred.shape) > 1:
+        if len(pred.shape) > 1:  # If predictions have an extra dimension, flatten them
             pred = pred.flatten()
         predictions.append(pred)
-    predictions = np.array(predictions)
+
+#    predictions = np.array([model.predict(X_test) for model in models])
+    predictions = np.array(predictions)  # Convert to a clean numpy array
     print("predictions: ", predictions)
-    final_decision = np.round(predictions.mean(axis=0))
+    final_decision = np.round(predictions.mean(axis=0))  # Ensemble averaging
     return final_decision
 
-def apply_risk_management(predictions): #, stop_loss=0.02, take_profit=0.05):
+def apply_risk_management(predictions, stop_loss=0.02, take_profit=0.05):
     decisions = []
     for pred in predictions:
-        pred = int(round(pred))
+        pred = int(round(pred))  # Ensure integer output (no floating-point issues)
         if pred == 1:
             decisions.append("BUY")
-        elif pred == 2:   #-1
+        elif pred == -1:
             decisions.append("SELL")
         else:
             decisions.append("HOLD")
     return decisions
 
+# Visualization Functions
 def plot_signals(df, predictions):
-    print(df)
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError("Expected `df` to be a Pandas DataFrame, but got {}".format(type(df)))
-    print(f"Available columns: {df.columns}")
-    df.columns = df.columns.str.lower()
-    if 'close' not in df.columns:
-        raise KeyError("Column 'close' is missing from DataFrame. Available columns: {}".format(df.columns))
-    df['Decision'] = predictions
+    df['decision'] = predictions
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Price'))
-    fig.add_trace(go.Scatter(x=df[df['Decision'] == 1].index, y=df[df['Decision'] == 1]['close'], 
-                             mode='markers', marker=dict(color='green', size=8), name='BUY'))
-    fig.add_trace(go.Scatter(x=df[df['Decision'] == -1].index, y=df[df['Decision'] == -1]['close'], 
-                             mode='markers', marker=dict(color='red', size=8), name='SELL'))
-    fig.update_layout(title='Trading Signals', xaxis_title='Time', yaxis_title='Price')
+    fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='price'))
+    fig.add_trace(go.Scatter(x=df[df['decision'] == 1].index, y=df[df['decision'] == 1]['close'], mode='markers', marker=dict(color='green', size=8), name='BUY'))
+    fig.add_trace(go.Scatter(x=df[df['decision'] == -1].index, y=df[df['decision'] == -1]['close'], mode='markers', marker=dict(color='red', size=8), name='SELL'))
+    fig.update_layout(title='Trading Signals', xaxis_title='time', yaxis_title='price')
     fig.show()
-
 
 def plot_feature_importance(model, features):
     if hasattr(model, "feature_importances_"):
         importance = model.feature_importances_
-        plt.figure(figsize=(10, 5))
+        plt.figure(figsize=(10,5))
         sns.barplot(x=importance, y=features)
         plt.title('Feature Importance')
         plt.show()
     else:
-        print(f"warning ⚠️  Feature importance is not available for model {model} type.")
-        print(f"features that are available for this model ({model}): {model.features}")
-
-def plot_mobthly_returns(df):
-    df = pd.DataFrame({
-        'Date': [df['timestamp']],
-        'Month End Price': [df['close']]
-    }).set_index('Date')
-    df.index = pd.to_datetime(df.index)
-    df['Monthly Returns'] = df['Month End Price'].diff()/df['Month End Price']
-    df['Multiplier'] = df['Monthly Returns'].apply(lambda x: max(x, 0)) + 1
-    df['Cash'] = df['Multiplier'].cumprod() * 41
-    plt.figure(figsize=(10,5))
-    plt.plot(df['Cash'], label='Monthly cash Return')
-    plt.title('Monthly Returns')
-    plt.legend()
-    plt.show()
-    print("monthly return :", df['Monthly Returns'])
-    print("multiplier :", df['Multiplier'])
-    print("cash :", df['Cash'])
+        print(f"model {model}: has no feature called feature_importances_")
 
 def plot_cumulative_returns(df, predictions):
-    if predictions is None or len(predictions) != len(df):
-        print("⚠️ No valid predictions provided for dataframe {df}. Skip plotting cumulative returns.")
-        return
-    df['Strategy Returns'] = df['close'] * predictions  # Ensure alignment
-    df['Cumulative Returns'] = (1 + df['Strategy Returns']).cumprod()
-    plt.figure(figsize=(10, 5))
-    plt.plot(df['Cumulative Returns'], label='Strategy')
-    plt.title('Cumulative Returns')
-    plt.legend()
-    plt.show()
+    print(f"under construction..")
+#    df['Strategy Returns'] = df['close'] * predictions
+#    df['Cumulative Returns'] = (1 + df['Strategy Returns']).cumprod()
+#    plt.figure(figsize=(10,5))
+#    plt.plot(df['Cumulative Returns'], label='Strategy')
+#    plt.title('Cumulative Returns')
+#    plt.legend()
+#    plt.show()
 
 # Calculate technical indicators
 def calculate_indicators(df):
-    df['SMA14'] = df['close'].rolling(window=30).mean()  								# Simple Moving Average
-    df['EMA14'] = df['close'].ewm(span=30, adjust=False).mean()  							# Exponential Moving Average
-    df['EMA'] = df['close'].ewm(span=30).mean()                       							# , adjust=False # Exponential Moving Average (14-period) technical indicator
-    df['RSI'] = talib.RSI(df['close'], timeperiod=30)  									# Relative Strength Index
-    df['MACD'], df['MACD_signal'], _ = talib.MACD(df['close'], fastperiod=24, slowperiod=40, signalperiod=3)  		# MACD
+    df['SMA14'] = df['close'].rolling(window=14).mean()  								# Simple Moving Average
+    df['EMA14'] = df['close'].ewm(span=14, adjust=False).mean()  							# Exponential Moving Average
+    df['EMA'] = df['close'].ewm(span=14).mean()                       							# , adjust=False # Exponential Moving Average (14-period) technical indicator
+    df['RSI'] = talib.RSI(df['close'], timeperiod=14)  									# Relative Strength Index
+    df['MACD'], df['MACD_signal'], _ = talib.MACD(df['close'], fastperiod=12, slowperiod=26, signalperiod=9)  		# MACD
     df['UpperBand'], df['MiddleBand'], df['LowerBand'] = talib.BBANDS(df['close'], timeperiod=20)  			# Bollinger Bands
     df = df.dropna()  													# Drop NaN values
     return df
@@ -266,7 +291,6 @@ def fe_preprocess(exch="binance"):
     binance_data['target'] = binance_data['target'].astype(int)									# force dataframe's target as type int
     binance_data['target'] = binance_data['target'].apply(lambda x: 1 if x == 1 else -1)					# Target variable (Buy=1, Hold=0, Sell=-1)
     binance_data['close'].fillna(0) 		                                                                       	 	# Fill NaN values with the last valid observation
-    print(binance_data)                                                                                                  	# just for show
     return binance_data
 
   if exch=='bitvavo':
@@ -278,104 +302,109 @@ def fe_preprocess(exch="binance"):
     bitvavo_data['target'] = bitvavo_data['close'].shift(-1) > bitvavo_data['close']
     bitvavo_data['target'] = bitvavo_data['target'].astype(int)									# force dataframe's target as type int
     bitvavo_data['target'] = bitvavo_data['target'].apply(lambda x: 1 if x == 1 else -1)					# Target variable (Buy=1, Hold=0, Sell=-1)
-    bitvavo_data['close'].fillna(0) 		                                                                        	# Fill NaN values with the last valid observation
-    print(bitvavo_data)                                                                                                  	# just for show
+    bitvavo_data['close'].fillna(0) 		                                                                        # Fill NaN values with the last valid observation
     return bitvavo_data
 
   if exch=='yahoofinance':
     yf_data = fetch_yfinance_data(symbol='ETH-USD', interval="1d", period="1y")
     yf_data = calculate_indicators(yf_data)
     features = ['SMA14', 'EMA14', 'EMA', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']                                 # technical indicators
-    scaler = MinMaxScaler()                                                                                                	# start the scaler
+    scaler = MinMaxScaler()                                                                                                # start the scaler
     yf_data[features] = scaler.fit_transform(yf_data[features])
     yf_data['target'] = yf_data['close'].shift(-1) > yf_data['close']
     yf_data['target'] = yf_data['target'].astype(int)
     yf_data['target'] = yf_data['target'].apply(lambda x: 1 if x == 1 else -1)
     yf_data['close'].fillna(0)
-    print(yf_data)
     return yf_data
 
-# Visualization Function
-def plot_exchange_data(df=None, exchange_name="binance", color='black', model=None, features=None, predictions=None):
+
+def plot_exchange_data(models, data=None, exchange_name='binance', color='black', features=None, predictions=None):
     fig, ax1 = plt.subplots(figsize=(12, 6))
-    ax1.plot(df['timestamp'], df['close'], label=f'{exchange_name} BTC', color=color)
+    print(predictions)
+    decisions=predictions
+    ax1.plot(data['timestamp'], data['close'], label=f'{exchange_name} BTC', color='black')
     ax1.set_xlabel('date')
     ax1.set_ylabel('price')
     ax1.legend(loc='upper left')
     ax2 = ax1.twinx()
     if exchange_name == "binance":
-        ax2.plot(df['timestamp'], df['SMA'], label='SMA', linestyle='dashed', color='pink')
+        ax2.plot(data['timestamp'], data['SMA'], label='SMA', linestyle='dashed', color='pink')
     else:
-        ax2.plot(df['timestamp'], df['SMA14'], label='SMA14', linestyle='dashed', color='pink')
-    ax2.plot(df['timestamp'], df['EMA14'], label='EMA14', linestyle='dotted', color='yellow')
-    ax2.plot(df['timestamp'], df['MACD'], label='MACD', linestyle='dashed', color='orange')
-    ax2.plot(df['timestamp'], df['RSI'], label='RSI', linestyle='dashdot', color='aquamarine')
-    ax2.plot(df['timestamp'], df['UpperBand'], label='UpperBand', linestyle=(0, (5, 2)), color='fuchsia')
-    ax2.plot(df['timestamp'], df['MiddleBand'], label='MiddleBand', linestyle=(0, (5, 10)), color='darkgoldenrod')
-    ax2.plot(df['timestamp'], df['LowerBand'], label='LowerBand', linestyle=(0, (10, 5)), color='gold')
+        ax2.plot(data['timestamp'], data['SMA14'], label='SMA14', linestyle='dashed', color='pink')
+    ax2.plot(data['timestamp'], data['EMA14'], label='EMA14', linestyle='dotted', color='yellow')
+    ax2.plot(data['timestamp'], data['MACD'], label='MACD', linestyle='dashed', color='orange')
+    ax2.plot(data['timestamp'], data['RSI'], label='RSI', linestyle='dashdot', color='aquamarine')
+    ax2.plot(data['timestamp'], data['UpperBand'], label='UpperBand', linestyle=(0, (5, 2)), color='fuchsia')
+    ax2.plot(data['timestamp'], data['MiddleBand'], label='MiddleBand', linestyle=(0, (5, 10)), color='darkgoldenrod')
+    ax2.plot(data['timestamp'], data['LowerBand'], label='LowerBand', linestyle=(0, (10, 5)), color='gold')
     ax2.set_ylabel('Indicators')
     ax2.legend(loc='upper right')
     plt.title(f"Dimi's Historical Crypto Data fetched from {exchange_name}!")
     plt.show()
-    plot_signals(df, predictions)
-    plot_feature_importance(model, features)
-    plot_cumulative_returns(df, predictions)
-    plot_mobthly_returns(df)
+    plot_signals(data, predictions=None)
+    plot_feature_importance(models, features)
+    plot_cumulative_returns(data, predictions=None)
 
 binance_data = fe_preprocess(exch='binance')
-features = ['SMA', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
-X_train, X_test, y_train, y_test = split_data(binance_data, features, 'target')
-feature_names = features
-rf = train_model(RandomForestClassifier, X_train, y_train)
-rf.fit(X_train, y_train)
-cnn_model = train_CNN(X_train, y_train)
+binfeatures = ['SMA', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
+X_train, X_test, y_train, y_test = split_data(binance_data, binfeatures, 'target')
+feature_names = binfeatures
+forest = RandomForestClassifier(random_state=0)
+forest.fit(X_train, y_train)
+rf_model = train_model(RandomForestClassifier, X_train, y_train)
 lstm_model = train_LSTM(X_train, y_train)
+cnn_model = train_CNN(X_train, y_train)
 lr_model = train_model(LinearRegression, X_train, y_train)
 LR_model = train_model(LogisticRegression, X_train, y_train)
 KNC_model = train_model(KNeighborsClassifier, X_train, y_train)
 DTC_model = train_model(DecisionTreeClassifier, X_train, y_train)
 DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
 RFR_model = train_model(RandomForestRegressor,  X_train, y_train)
-binrf_model = train_model(RandomForestClassifier(random_state=0), X_train, y_train)
-models = [binrf_model]
+models = [rf_model]
+binmodels= [rf_model, lstm_model, cnn_model, lr_model, LR_model, KNC_model, DTC_model, DTR_model, RFR_model]
 bindecisions = make_decision(models, X_train)
 binfinal_trades = apply_risk_management(bindecisions)
+print("final trade decisions: ", binfinal_trades)
 
 bitvavo_data = fe_preprocess(exch='bitvavo')
-features = ['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
-X_train, X_test, y_train, y_test = split_data(bitvavo_data, features, 'target')
-cnn_model = train_CNN(X_train, y_train)
+bitfeatures = ['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
+X_train, X_test, y_train, y_test = split_data(bitvavo_data, bitfeatures, 'target')
+feature_names = bitfeatures
+rf_model = train_model(RandomForestClassifier, X_train, y_train)
 lstm_model = train_LSTM(X_train, y_train)
+cnn_model = train_CNN(X_train, y_train)
 lr_model = train_model(LinearRegression, X_train, y_train)
 LR_model = train_model(LogisticRegression, X_train, y_train)
 KNC_model = train_model(KNeighborsClassifier, X_train, y_train)
-DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
 DTC_model = train_model(DecisionTreeClassifier, X_train, y_train)
+DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
 RFR_model = train_model(RandomForestRegressor,  X_train, y_train)
-bitrf_model = train_model(RandomForestClassifier, X_train, y_train)
-models = [bitrf_model]
+models = [rf_model]
+bitmodels= [rf_model, lstm_model, cnn_model, lr_model, LR_model, KNC_model, DTC_model, DTR_model, RFR_model]
 bitdecisions = make_decision(models, X_train)
 bitfinal_trades = apply_risk_management(bitdecisions)
+print("final trade decisions: ", bitfinal_trades)
 
 yf_data = fe_preprocess(exch='yahoofinance')
-features = ['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
-X_train, X_test, y_train, y_test = split_data(yf_data, features, 'target')
-cnn_model = train_CNN(X_train, y_train)
+yffeatures = ['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand']
+X_train, X_test, y_train, y_test = split_data(yf_data, yffeatures, 'target')
+feature_names = yffeatures
+rf_model = train_model(RandomForestClassifier, X_train, y_train)
 lstm_model = train_LSTM(X_train, y_train)
+cnn_model = train_CNN(X_train, y_train)
 lr_model = train_model(LinearRegression, X_train, y_train)
 LR_model = train_model(LogisticRegression, X_train, y_train)
 KNC_model = train_model(KNeighborsClassifier, X_train, y_train)
-DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
 DTC_model = train_model(DecisionTreeClassifier, X_train, y_train)
+DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
 RFR_model = train_model(RandomForestRegressor,  X_train, y_train)
-yfrf_model = train_model(RandomForestClassifier, X_train, y_train)
-models = [yfrf_model]
+models=[rf_model]
+yfmodels=[rf_model, lstm_model, cnn_model, lr_model, LR_model, KNC_model, DTC_model, DTR_model, RFR_model]
 yfdecisions = make_decision(models, X_train)
 yffinal_trades = apply_risk_management(yfdecisions)
+print("final trade decisions: ", yffinal_trades)
 
-print("binance decisions: ", bindecisions)
-plot_exchange_data(binance_data, exchange_name="binance", color="black", model=binrf_model, features=['SMA', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=bindecisions)
-print("bitvavo decisions: ", bitdecisions)
-plot_exchange_data(bitvavo_data, exchange_name="Bitvavo", color="black", model=bitrf_model, features=['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=bitdecisions)
-print("yahoofin decisions:", yfdecisions)
-plot_exchange_data(yf_data, exchange_name="YahooFinance", color="black", model=yfrf_model, features=['SMA14', 'EMA14', 'RSI', 'MACD', 'UpperBand', 'MiddleBand', 'LowerBand'], predictions=yfdecisions)
+plot_exchange_data(data=binance_data, exchange_name="binance", color="black", models=binmodels, features=binfeatures, predictions=bindecisions)
+plot_exchange_data(data=bitvavo_data, exchange_name="Bitvavo", color="black", models=bitmodels, features=bitfeatures, predictions=bitdecisions)
+plot_exchange_data(data=yf_data, exchange_name="YahooFinance", color="black", models=yfmodels, features=yffeatures, predictions=yfdecisions)
+
