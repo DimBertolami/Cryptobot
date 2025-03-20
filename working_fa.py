@@ -336,7 +336,7 @@ KNC_model = train_model(KNeighborsClassifier, X_train, y_train)
 DTC_model = train_model(DecisionTreeClassifier, X_train, y_train)
 DTR_model = train_model(DecisionTreeRegressor, X_train, y_train)
 RFR_model = train_model(RandomForestRegressor,  X_train, y_train)
-binrf_model = train_model(RandomForestClassifier(random_state=0), X_train, y_train)
+binrf_model = train_model(RandomForestClassifier, X_train, y_train)
 models = [binrf_model]
 bindecisions = make_decision(models, X_train)
 binfinal_trades = apply_risk_management(bindecisions)
